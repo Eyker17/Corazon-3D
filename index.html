@@ -14,7 +14,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #050005;
+            background-color: #010001; /* Fondo ligeramente más oscuro para mayor contraste */
             font-family: 'Arial', sans-serif;
             display: flex;
             justify-content: center;
@@ -30,7 +30,7 @@
         }
         #instrucciones {
             position: absolute;
-            bottom: 30px;
+            bottom: 40px;
             color: rgba(255, 255, 255, 0.4);
             font-size: 14px;
             text-align: center;
@@ -38,18 +38,19 @@
             width: 100%;
             z-index: 10;
             animation: pulse 2s infinite;
+            letter-spacing: 1px;
         }
         @keyframes pulse {
-            0% { opacity: 0.3; }
-            50% { opacity: 0.7; }
-            100% { opacity: 0.3; }
+            0% { opacity: 0.2; transform: translateY(0); }
+            50% { opacity: 0.6; transform: translateY(-5px); }
+            100% { opacity: 0.2; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
 
     <canvas id="heartCanvas"></canvas>
-    <div id="instrucciones">Desliza la pantalla para girar el corazón ❤️</div>
+    <div id="instrucciones">Desliza para girar ❤️</div>
 
     <script>
         const canvas = document.getElementById('heartCanvas');
@@ -58,32 +59,46 @@
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+            // Regenerar partículas en resize para recalcular la escala
+            if (particles.length > 0) initHeartPoints(); 
         }
-        resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
 
-        // --- OPTIMIZACIÓN: CACHE DE TEXTOS (OFFSCREEN CANVASES) ---
-        // Actualizado con los mensajes personalizados
+        // --- OPTIMIZACIÓN: CACHE DE TEXTOS CON EFECTO NEÓN GLOW ---
         const phrases = ["Te amo Carolina", "Te quiero mucho Geo"];
-        const colors = ["#ff2a6d", "#ff62a5", "#ffb3d1", "#ffffff"];
+        const baseColors = ["#ff2a6d", "#ff62a5", "#ffffff"]; // Neon pinks y blanco
         const textCaches = [];
+        const baseFontSize = 24;
 
         phrases.forEach(phrase => {
-            colors.forEach(color => {
+            baseColors.forEach(color => {
                 const offscreen = document.createElement('canvas');
                 const oCtx = offscreen.getContext('2d');
                 
-                // Reducimos un poco el tamaño base de 32px a 24px porque las frases son más largas
-                oCtx.font = "bold 24px Arial";
+                // Medir texto
+                oCtx.font = `bold ${baseFontSize}px Arial`;
                 const metrics = oCtx.measureText(phrase);
                 
-                offscreen.width = Math.ceil(metrics.width) + 10;
-                offscreen.height = 36;
+                // Dimensiones del canvas auxiliar (con espacio para el glow)
+                const glowSpread = 12; // Cuanto se extiende el neón
+                offscreen.width = Math.ceil(metrics.width) + (glowSpread * 2);
+                offscreen.height = baseFontSize + (glowSpread * 2);
                 
-                oCtx.font = "bold 24px Arial";
-                oCtx.fillStyle = color;
+                // Configuración de dibujo en offscreen
                 oCtx.textBaseline = "middle";
                 oCtx.textAlign = "center";
+                oCtx.font = `bold ${baseFontSize}px Arial`;
+                
+                // --- INSERCIÓN DEL EFECTO GLOW (Pre-renderizado) ---
+                oCtx.shadowColor = color;
+                oCtx.shadowBlur = glowSpread;
+                oCtx.fillStyle = color;
+                oCtx.fillText(phrase, offscreen.width / 2, offscreen.height / 2);
+                
+                // Dibujamos el texto una segunda vez encima (blanco o color base)
+                // para que el núcleo del texto sea brillante y legible
+                oCtx.shadowBlur = 0; // Desactivar glow para la capa superior
+                oCtx.fillStyle = "#ffffff"; // O utilizar 'color' si prefieres núcleos de color
                 oCtx.fillText(phrase, offscreen.width / 2, offscreen.height / 2);
                 
                 textCaches.push({
@@ -95,110 +110,174 @@
             });
         });
 
-        const totalParticles = 1000;
-        const particles = [];
+        // --- CONFIGURACIÓN DE PARTÍCULAS ---
+        const totalParticles = 1200; // Un poco más para mayor densidad
+        let particles = [];
         
+        // Rotación y control
         let angleX = 0;
         let angleY = 0.5; 
         let targetAngleX = 0;
         let targetAngleY = 0.5;
 
+        // Morphing (el inicio disperso)
         let morphProgress = 0;
         const morphSpeed = 0.003; 
 
+        // Touch/Mouse controls
         let isDragging = false;
         let previousX = 0;
         let previousY = 0;
 
-        for (let i = 0; i < totalParticles; i++) {
-            const t = Math.random() * Math.PI * 2;
-            const phi = (Math.random() - 0.5) * Math.PI;
-            const r = Math.cos(phi);
+        // --- NUEVA GEOMETRÍA 3D (Corazón Puffy/Volumétrico) ---
+        function initHeartPoints() {
+            particles = [];
+            // Determinar la escala base según la pantalla (móvil vs pc)
+            const minDim = Math.min(canvas.width, canvas.height);
+            const scale = minDim * 0.024; 
 
-            let tx = 16 * Math.pow(Math.sin(t), 3) * r;
-            let ty = (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) * r;
-            let tz = 15 * Math.sin(phi);
+            for (let i = 0; i < totalParticles; i++) {
+                // 1. Base del corazón en 2D (Fórmula Cardioide estándar t)
+                // Usamos random t para distribuir uniformemente por el contorno
+                const t = Math.random() * Math.PI * 2;
+                let tx = 16 * Math.pow(Math.sin(t), 3);
+                let ty = -(13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t));
+                
+                // 2. Generar volumen (Puffiness)
+                // 'v' define la profundidad y el redondeo de los bordes.
+                const v = (Math.random() - 0.5) * 2; // -1 a 1
 
-            const scale = Math.min(canvas.width, canvas.height) * 0.022;
-            tx *= scale;
-            ty *= -scale;
-            tz *= scale;
+                // Esta es la clave para que no se vea plano: redondeamos los bordes
+                const roundingFactor = Math.sqrt(Math.max(0, 1 - Math.pow(v, 2)));
+                
+                // Escala de profundidad (grosor)
+                const thickness = 10; 
 
-            const sx = (Math.random() - 0.5) * canvas.width * 1.8;
-            const sy = (Math.random() - 0.5) * canvas.height * 1.8;
-            const sz = (Math.random() - 0.5) * 400;
+                // Aplicamos el redondeo a X e Y basándonos en la Z
+                tx *= (0.8 + 0.2 * roundingFactor);
+                ty *= (0.8 + 0.2 * roundingFactor);
+                let tz = thickness * v * roundingFactor; // Z sigue una curva esférica respecto al borde
 
-            // Selección de los nuevos mensajes
-            const selectedPhrase = i % 2 === 0 ? "Te amo Carolina" : "Te quiero mucho Geo";
-            
-            const validCaches = textCaches.filter(c => c.phrase === selectedPhrase);
-            const myCache = validCaches[Math.floor(Math.random() * validCaches.length)];
+                // Aplicar escala a unidades de pantalla
+                tx *= scale;
+                ty *= scale;
+                tz *= scale;
 
-            particles.push({
-                sx, sy, sz,
-                tx, ty, tz,
-                cache: myCache,
-                sizeModifier: 0.35 + Math.random() * 0.25 
-            });
+                // 3. Posiciones de inicio (Dispersión aleatoria)
+                const sx = (Math.random() - 0.5) * canvas.width * 2.5;
+                const sy = (Math.random() - 0.5) * canvas.height * 2.5;
+                const sz = (Math.random() - 0.5) * 1000;
+
+                // 4. Asignar mensaje y cache
+                const selectedPhrase = i % 2 === 0 ? "Te amo Carolina" : "Te quiero mucho Geo";
+                const validCaches = textCaches.filter(c => c.phrase === selectedPhrase);
+                const myCache = validCaches[Math.floor(Math.random() * validCaches.length)];
+
+                // 5. Tamaño de partícula (ligeramente ajustado para móvil)
+                let szMod = 0.3 + Math.random() * 0.25;
+                if (canvas.width < 600) szMod *= 0.85; // Un poco más pequeñas en móvil
+
+                particles.push({
+                    sx, sy, sz, // Start
+                    tx, ty, tz, // Target (Heart)
+                    cache: myCache,
+                    sizeModifier: szMod
+                });
+            }
         }
 
-        function startDrag(x, y) { isDragging = true; previousX = x; previousY = y; }
+        // Inicializar por primera vez
+        resizeCanvas();
+        initHeartPoints();
+
+        // --- CONTROLES DE INTERACCIÓN ---
+        function startDrag(x, y) { 
+            isDragging = true; 
+            previousX = x; 
+            previousY = y; 
+            // Ocultar instrucciones al primer toque
+            document.getElementById('instrucciones').style.display = 'none';
+        }
         function moveDrag(x, y) {
             if (!isDragging) return;
-            targetAngleY += (x - previousX) * 0.007;
-            targetAngleX += (y - previousY) * 0.007;
+            // Sensibilidad ajustada para móvil/desktop
+            const sensitivity = 0.006;
+            targetAngleY += (x - previousX) * sensitivity;
+            targetAngleX += (y - previousY) * sensitivity;
             previousX = x; previousY = y;
         }
         function endDrag() { isDragging = false; }
 
         window.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX, e.touches[0].clientY));
-        window.addEventListener('touchmove', (e) => moveDrag(e.touches[0].clientX, e.touches[0].clientY));
+        window.addEventListener('touchmove', (e) => moveDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: false }); // Prevenir scroll nativo
         window.addEventListener('touchend', endDrag);
         window.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
         window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
         window.addEventListener('mouseup', endDrag);
 
+        // --- LOOP DE ANIMACIÓN ---
         function animate() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Limpiar pantalla con un negro puro
+            ctx.fillStyle = '#010001';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+            // Progresión del morphing inicial
             if (morphProgress < 1) morphProgress += morphSpeed;
-            if (!isDragging) targetAngleY += 0.003; 
+            // Rotación automática lenta si no se está arrastrando
+            if (!isDragging) targetAngleY += 0.0015; 
 
-            angleX += (targetAngleX - angleX) * 0.05;
-            angleY += (targetAngleY - angleY) * 0.05;
+            // Suavizado de la rotación (lerp)
+            angleX += (targetAngleX - angleX) * 0.06;
+            angleY += (targetAngleY - angleY) * 0.06;
 
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
-            const perspective = 500;
+            const perspective = 700; // Aumentado para un 3D más natural
+
+            // Opciones de estilo globales (para que las partículas se sumen)
+            ctx.globalCompositeOperation = 'lighter'; // Efecto aditivo (glow se intensifica)
 
             for (let i = 0; i < totalParticles; i++) {
                 const p = particles[i];
 
+                // Interpolación lineal entre dispersión y forma de corazón
                 const cx = p.sx + (p.tx - p.sx) * morphProgress;
                 const cy = p.sy + (p.ty - p.sy) * morphProgress;
                 const cz = p.sz + (p.tz - p.sz) * morphProgress;
 
+                // ROTACIÓN 3D
+                // Rotar en Y
                 let x1 = cx * Math.cos(angleY) - cz * Math.sin(angleY);
                 let z1 = cx * Math.sin(angleY) + cz * Math.cos(angleY);
 
+                // Rotar en X
                 let y2 = cy * Math.cos(angleX) - z1 * Math.sin(angleX);
                 let z2 = cy * Math.sin(angleX) + z1 * Math.cos(angleX);
 
+                // Proyección 2D si está frente a la cámara
                 if (z2 < -perspective) continue;
 
                 const pScale = perspective / (perspective + z2);
                 const screenX = centerX + x1 * pScale;
                 const screenY = centerY + y2 * pScale;
 
+                // Escala final del texto (tamaño base * perspectiva * modificador random)
                 const finalScale = p.sizeModifier * pScale;
                 const w = p.cache.width * finalScale;
                 const h = p.cache.height * finalScale;
 
-                ctx.globalAlpha = Math.min(1, Math.max(0.1, (perspective - z2) / (perspective * 1.3)));
+                // Profundidad de campo (transparencia basada en Z)
+                // Las partículas muy lejanas se desvanecen
+                ctx.globalAlpha = Math.min(1, Math.max(0.05, (perspective - z2 / 1.5) / (perspective * 1.5)));
+                
+                // Dibujar el canvas pre-renderizado (con el glow neón)
                 ctx.drawImage(p.cache.canvas, screenX - w / 2, screenY - h / 2, w, h);
             }
 
+            // Restaurar configuración estándar para siguientes elementos
             ctx.globalAlpha = 1.0;
+            ctx.globalCompositeOperation = 'source-over';
+            
             requestAnimationFrame(animate);
         }
 
